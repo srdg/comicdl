@@ -65,15 +65,17 @@ function getJSONData(html) {
     var hyphenIdx = src.lastIndexOf('-'); // this will come in handy later
     var dotIndex = src.lastIndexOf('.'); //==============ditto=============
     var num = src.slice(hyphenIdx + 1, dotIndex); // this gives the first page as is in url (e.g. 0001)
+    var pad = num.length; // this is the length of num as is in url, (e.g. 0001 will give a pad 4)
     var baseurl = src.slice(0, hyphenIdx + 1); // this gives the complete base url
     var ext = src.slice(dotIndex, src.length); // this gives you the file extension (e.g. .jpg, .png)
     var beg = parseInt(num); // this is the first page number as an integer
+
 
     // start from `beg` since we don't know what the first page number is
     // and continue till `beg+len`
     for (var i = beg; i < beg + len; i++) { 
         // form the URL. Zeropad is used to pad the integer before it gets appeneded to the string
-        var urlc = baseurl + zeropad(i, num.length) + ext;
+        var urlc = baseurl + zeropad(i, pad) + ext;
         // put it in the data
         data.push(
             {
