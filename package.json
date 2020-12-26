@@ -1,0 +1,26 @@
+{
+  "name": "comicdl",
+  "version": "1.0.0",
+  "description": "Download comics via UI",
+  "main": "app.js",
+  "scripts": {
+    "test": "node run app.js"
+  },
+  "keywords": [
+    "webscraping",
+    "nightmare",
+    "cheerio",
+    "manga",
+    "comics",
+    "automation"
+  ],
+  "author": "https://github.com/srdg",
+  "license": "ISC",
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.5",
+    "express": "^4.17.1",
+    "image-downloader": "^4.0.2",
+    "nightmare": "^3.0.2",
+    "zeropad": "^1.1.0"
+  }
+}
