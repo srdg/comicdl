@@ -3,52 +3,34 @@ const Nightmare = require("nightmare");
 const cheerio = require("cheerio");
 const zeropad = require("zeropad");
 const download = require("image-downloader");
+const fs = require("fs");
+const PDFDocument = require("pdfkit");
+const request = require("request");
 
 const nightmare = Nightmare({ 
     // Uncomment the following line to see the browser instance
    // show : true 
 });
 // Parent url from where the data will be parsed
-const url = "https://www.omgbeaupeep.com/comics/Avatar_The_Last_Airbender/001/";
+const url = "https://www.omgbeaupeep.com/comics/Avatar_The_Last_Airbender/005/";
 
-nightmare // It is!
+nightmare 
     .goto(url) // go to the url
     .wait('body') // wait for the whole body to load
     .evaluate( ()=>document.querySelector('body').innerHTML) // validate the HTML content is present
     .end() // kill the browser instance
-    .then(response => { // now take the response
+    .then(response => { // take the response
         /**
-         * Take this response and pass it to get the JSON data.
-         * The JSON consists of 2 things, a page number of the comic and an url to it.
-         * Take this JSON, and pass it to processJSONData for further processing as a callback.
+         * Pass this response to get the JSON data.
+         * The JSON contains a page number of the comic and an url.
+         * Take the JSON, and pass it to processJSONData for further processing.
          */
-        processJSONData(response, getJSONData(response)); 
+        data = getJSONData(response);
+        processJSONData(data);
     })
     .catch(err => { // catch the errors
-        console.log(err);  // and put 'em all on the console
+        console.log(err);  // and log on the console
     });
-       
-
-/**
- * Parses the JSON data and downloads the images from the given URL(s).  
- * Saves the images in the directory `./Book` with the page number for each file.
- * @param {*} response the HTTP response object
- * @param {*} data the JSON data containing the detailed information about the comic book pages
- */
-function processJSONData(response, data){
-    console.log("Processing JSON data. Content follows."); 
-    console.log(data); // Log the JSON contents just to flex
-    data.forEach(element => {   // for each of the objects,
-        download.image(element) // download the image asynchronously 
-        .then(({ filename }) => { // and log when the image is downloaded
-        process.stdout.write('Saving to', filename); // not using console.log because it adds \n, always
-        })
-        .then ( () => {
-        console.log("done."); // yeah, me too
-        })
-        .catch((err) => console.error(err)); // if any error comes, you know what to do
-    });
-}
 
 /**
  * Reads the HTML content and scours the DOM to get the URL(s) for each page of the comic.
@@ -60,6 +42,7 @@ function getJSONData(html) {
     // load the HTML content
     const $ = cheerio.load(html);
     // and now it's time to hack, slice and dice the content to get what we need
+    // src will contain the path to the comic page on server
     var src = "https://www.omgbeaupeep.com/comics/" + $('[class=picture]')[0].attribs['src'];
     var len = $('[name=page]')[0].children.length; // gives you number of pages for the comic
     var hyphenIdx = src.lastIndexOf('-'); // this will come in handy later
@@ -86,4 +69,59 @@ function getJSONData(html) {
     }
     // and return the whole thing
     return data;
+}
+
+/**
+ * Parses the JSON data and downloads the images from the given URL(s).  
+ * Saves the images in the directory `./Book` with the page number for each file.
+ * @param {*} data the JSON data containing the detailed information about the comic book pages
+ */
+function processJSONData(data){
+    console.log("Processing JSON data. Content follows."); 
+    console.log(data); // Log the JSON contents just to flex
+
+    // Use promises instead of forEach to synchronize download and creation of PDF
+    var promises = data.map(function(element){ // map this function to each JSON object
+        const maxTimeToWait = 40000;
+        return Promise.race([download.image(element) // return the return value of inner callbacks, trigger download
+        .then( ({filename}) => { // and then take the filename
+            console.log("Saved to ",filename); // log message
+            return filename; // and return the path to where the file was saved
+        }), timeout(maxTimeToWait, element)]);
+    });
+
+    // Synchronized version of creating PDF
+    Promise.all(promises).
+    then(function (data){ // once all promises are resolved, take the filenames
+        // get the comic name
+        var mangaName = url.slice(url.indexOf("comics")+7, url.length-1).replace("/","_")+".pdf";
+        var pdfdoc = new PDFDocument;
+        pdfdoc.pipe(fs.createWriteStream(mangaName));
+        console.log(data.toString().split(","));
+        // can use forEach here since all image dowloads should be resolved
+        data.toString().split(",").forEach(page => {
+            // console.log(page.toString());
+            pdfdoc.addPage();
+            pdfdoc.image(page, {scale:0.45, align:'center', valign:'center'}); 
+        });
+        pdfdoc.end();
+        return mangaName;
+    }).then( (mangaName) => {
+        console.log("Created PDF file: "+mangaName);
+    })
+    .catch ((error) => { // if any error occurs
+        console.error(error); // handle by logging on stdout
+    });
+}
+
+/**
+ * Resolve the promise with the `element` after `t` seconds pass
+ * @param {*} t the timeout duration
+ * @param {*} element each element of the JSON object
+ */
+function timeout(t, element) {
+    return new Promise(resolve => {
+        // resolve this promise with whatever image content is available till now
+        setTimeout(resolve, t, element["dest"]);
+    });
 }

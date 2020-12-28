@@ -20,7 +20,9 @@
     "cheerio": "^1.0.0-rc.5",
     "express": "^4.17.1",
     "image-downloader": "^4.0.2",
+    "ini": "^2.0.0",
     "nightmare": "^3.0.2",
+    "pdfkit": "^0.11.0",
     "zeropad": "^1.1.0"
   }
 }
