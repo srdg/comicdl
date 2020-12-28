@@ -15,22 +15,27 @@ const nightmare = Nightmare({
 const url = "https://www.omgbeaupeep.com/comics/Avatar_The_Last_Airbender/005/";
 
 nightmare 
-    .goto(url) // go to the url
-    .wait('body') // wait for the whole body to load
-    .evaluate( ()=>document.querySelector('body').innerHTML) // validate the HTML content is present
-    .end() // kill the browser instance
-    .then(response => { // take the response
-        /**
-         * Pass this response to get the JSON data.
-         * The JSON contains a page number of the comic and an url.
-         * Take the JSON, and pass it to processJSONData for further processing.
-         */
-        data = getJSONData(response);
-        processJSONData(data);
-    })
-    .catch(err => { // catch the errors
-        console.log(err);  // and log on the console
-    });
+.goto(url) // go to the url
+.wait('body') // wait for the whole body to load
+.evaluate( ()=>document.querySelector('body').innerHTML) // validate the HTML content is present
+.end() // kill the browser instance
+.then((response) => { // take the response
+    /**
+     * Pass this response to get the JSON data.
+     * The JSON contains a page number of the comic and an url.
+     * Take the JSON, and pass it to processJSONData for further processing.
+     */
+    return getJSONData(response);
+})
+.then((data) => {
+    return processJSONData(data);
+})
+.then((pages) => {
+    createFile(pages);
+}) 
+.catch(err => { // catch the errors
+    console.log(err);  // and log on the console
+});
 
 /**
  * Reads the HTML content and scours the DOM to get the URL(s) for each page of the comic.
@@ -80,48 +85,36 @@ function processJSONData(data){
     console.log("Processing JSON data. Content follows."); 
     console.log(data); // Log the JSON contents just to flex
 
-    // Use promises instead of forEach to synchronize download and creation of PDF
-    var promises = data.map(function(element){ // map this function to each JSON object
-        const maxTimeToWait = 40000;
-        return Promise.race([download.image(element) // return the return value of inner callbacks, trigger download
-        .then( ({filename}) => { // and then take the filename
-            console.log("Saved to ",filename); // log message
-            return filename; // and return the path to where the file was saved
-        }), timeout(maxTimeToWait, element)]);
+    // map() instead of forEach() to get a promise per request
+    const reqs = data.map(element => {
+        // return the inner promise chain to be collected
+        return download.image(element)
+        .then( ({filename}) => {
+            console.log("Saved to ",filename); 
+            return filename;
+        });
     });
 
-    // Synchronized version of creating PDF
-    Promise.all(promises).
-    then(function (data){ // once all promises are resolved, take the filenames
-        // get the comic name
-        var mangaName = url.slice(url.indexOf("comics")+7, url.length-1).replace("/","_")+".pdf";
-        var pdfdoc = new PDFDocument;
-        pdfdoc.pipe(fs.createWriteStream(mangaName));
-        console.log(data.toString().split(","));
-        // can use forEach here since all image dowloads should be resolved
-        data.toString().split(",").forEach(page => {
-            // console.log(page.toString());
-            pdfdoc.addPage();
-            pdfdoc.image(page, {scale:0.45, align:'center', valign:'center'}); 
-        });
-        pdfdoc.end();
-        return mangaName;
-    }).then( (mangaName) => {
-        console.log("Created PDF file: "+mangaName);
-    })
-    .catch ((error) => { // if any error occurs
-        console.error(error); // handle by logging on stdout
-    });
+    // wait for all of them to be finished
+    return Promise.all( reqs );
 }
 
-/**
- * Resolve the promise with the `element` after `t` seconds pass
- * @param {*} t the timeout duration
- * @param {*} element each element of the JSON object
- */
-function timeout(t, element) {
-    return new Promise(resolve => {
-        // resolve this promise with whatever image content is available till now
-        setTimeout(resolve, t, element["dest"]);
+function createFile(data){
+    // Synchronized version of creating PDF
+    var pdfdoc = new PDFDocument;
+    // get the comic name
+    var mangaName = url.slice(url.indexOf("comics")+7, url.length-1).replace("/","_")+".pdf";
+    pdfdoc.pipe(fs.createWriteStream(mangaName));
+    console.log(data.toString().split(","));
+    // Add a new page and create the PDF by adding each image per page
+    const pages = data.toString().split(",").map(page => {
+        // console.log(page.toString());
+        pdfdoc.addPage();
+        pdfdoc.image(page, {scale:0.45, align:'center', valign:'center'}); 
+    });
+    Promise.all(pages).then(() => {
+        pdfdoc.end();
+    }).then( () => {
+        console.log("PDF file created : "+mangaName);
     });
 }
