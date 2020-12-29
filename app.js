@@ -2,17 +2,24 @@
 const Nightmare = require("nightmare");
 const cheerio = require("cheerio");
 const zeropad = require("zeropad");
-const download = require("image-downloader");
+const download = require("./utils/download");
 const fs = require("fs");
 const PDFDocument = require("pdfkit");
-const request = require("request");
+const Bottleneck = require("bottleneck/es5");
 
 const nightmare = Nightmare({ 
     // Uncomment the following line to see the browser instance
    // show : true 
 });
+
+const limiter = new Bottleneck({
+    maxConcurrent: 1,
+    minTime: 333
+  });
+
 // Parent url from where the data will be parsed
-const url = "https://www.omgbeaupeep.com/comics/Avatar_The_Last_Airbender/005/";
+const url = "https://www.omgbeaupeep.com/comics/Avatar_The_Last_Airbender/017/";
+const dest = "./Book";
 
 nightmare 
 .goto(url) // go to the url
@@ -28,9 +35,11 @@ nightmare
     return getJSONData(response);
 })
 .then((data) => {
-    return processJSONData(data);
+    return limiter.schedule(() => processJSONData(data));
 })
 .then((pages) => {
+    console.log(" Inside createFile then block ");
+    console.log(pages.toString().split(","));
     createFile(pages);
 }) 
 .catch(err => { // catch the errors
@@ -67,10 +76,11 @@ function getJSONData(html) {
         // put it in the data
         data.push(
             {
-                url: urlc,
-                dest: "./Book/" + i + ext
+                uri: urlc,
+                filename: './Book/' + i + ext
             }
         );
+        if(i - beg +1 == 2) break;
     }
     // and return the whole thing
     return data;
@@ -86,17 +96,13 @@ function processJSONData(data){
     console.log(data); // Log the JSON contents just to flex
 
     // map() instead of forEach() to get a promise per request
-    const reqs = data.map(element => {
-        // return the inner promise chain to be collected
-        return download.image(element)
-        .then( ({filename}) => {
-            console.log("Saved to ",filename); 
-            return filename;
-        });
+    const reqs = download(data)
+    .then( (info) => {
+            console.log(" Download complete! \n",info); 
+            return info;
     });
-
     // wait for all of them to be finished
-    return Promise.all( reqs );
+    return reqs;
 }
 
 function createFile(data){
@@ -105,12 +111,13 @@ function createFile(data){
     // get the comic name
     var mangaName = url.slice(url.indexOf("comics")+7, url.length-1).replace("/","_")+".pdf";
     pdfdoc.pipe(fs.createWriteStream(mangaName));
-    console.log(data.toString().split(","));
+    var pagelist = data.toString().split(",");
     // Add a new page and create the PDF by adding each image per page
-    const pages = data.toString().split(",").map(page => {
+    const pages = pagelist.map(page => {
         // console.log(page.toString());
         pdfdoc.addPage();
         pdfdoc.image(page, {scale:0.45, align:'center', valign:'center'}); 
+        
     });
     Promise.all(pages).then(() => {
         pdfdoc.end();
