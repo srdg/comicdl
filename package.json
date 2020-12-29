@@ -17,6 +17,8 @@
   "author": "https://github.com/srdg",
   "license": "ISC",
   "dependencies": {
+    "axios": "^0.21.1",
+    "bottleneck": "^2.19.5",
     "cheerio": "^1.0.0-rc.5",
     "express": "^4.17.1",
     "image-downloader": "^4.0.2",
