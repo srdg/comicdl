@@ -7,6 +7,7 @@ const fs = require("fs");
 const PDFDocument = require("pdfkit");
 const Bottleneck = require("bottleneck/es5");
 
+
 const nightmare = Nightmare({ 
     // Uncomment the following line to see the browser instance
    // show : true 
@@ -17,34 +18,44 @@ const limiter = new Bottleneck({
     minTime: 333
   });
 
-// Parent url from where the data will be parsed
-const url = "https://www.omgbeaupeep.com/comics/Avatar_The_Last_Airbender/017/";
+// location to where the pages will be stored
 const dest = "./Book";
 
-nightmare 
-.goto(url) // go to the url
-.wait('body') // wait for the whole body to load
-.evaluate( ()=>document.querySelector('body').innerHTML) // validate the HTML content is present
-.end() // kill the browser instance
-.then((response) => { // take the response
-    /**
-     * Pass this response to get the JSON data.
-     * The JSON contains a page number of the comic and an url.
-     * Take the JSON, and pass it to processJSONData for further processing.
-     */
-    return getJSONData(response);
-})
-.then((data) => {
-    return limiter.schedule(() => processJSONData(data));
-})
-.then((pages) => {
-    console.log(" Inside createFile then block ");
-    console.log(pages.toString().split(","));
-    createFile(pages);
-}) 
-.catch(err => { // catch the errors
-    console.log(err);  // and log on the console
-});
+/**
+ * Parses the url for the comic, downloads the pages and adds all of them to a PDF file.
+ * @param {*} url The url from where the comic should be parsed. 
+ */
+function getManga(url){
+    nightmare 
+    .goto(url) // go to the url
+    .wait('body') // wait for the whole body to load
+    .evaluate( ()=>document.querySelector('body').innerHTML) // validate the HTML content is present
+    .end() // kill the browser instance
+    .then((response) => { // take the response
+        /**
+         * Pass this response to get the JSON data.
+         * The JSON contains a page number of the comic and an url.
+         * Take the JSON, and pass it to processJSONData for further processing.
+         */
+        return getJSONData(response);
+    })
+    .then((data) => {
+        return limiter.schedule(() => processJSONData(data));
+    })
+    .then((pages) => {
+        console.log(" Inside createFile then block ");
+        console.log(pages.toString().split(","));
+        var mangaName = createFile(url, pages);
+        return mangaName;
+    })
+    .then((mangaName) => {
+        console.log("Promise resolved! Manganme is ./"+mangaName);
+        return "./"+mangaName;
+    })
+    .catch(err => { // catch the errors
+        console.log(err);  // and log on the console
+    });
+}
 
 /**
  * Reads the HTML content and scours the DOM to get the URL(s) for each page of the comic.
@@ -80,7 +91,7 @@ function getJSONData(html) {
                 filename: './Book/' + i + ext
             }
         );
-        if(i - beg +1 == 2) break;
+        if(i - beg +1 == 1) break;
     }
     // and return the whole thing
     return data;
@@ -105,7 +116,11 @@ function processJSONData(data){
     return reqs;
 }
 
-function createFile(data){
+/**
+ * Create the PDF file from the pages
+ * @param {*} data the list of pages to be added to the comic
+ */
+function createFile(url, data){
     // Synchronized version of creating PDF
     var pdfdoc = new PDFDocument;
     // get the comic name
@@ -119,9 +134,50 @@ function createFile(data){
         pdfdoc.image(page, {scale:0.45, align:'center', valign:'center'}); 
         
     });
+    // Once all pages are finished, mark the end of document, log and return the filename
     Promise.all(pages).then(() => {
         pdfdoc.end();
     }).then( () => {
         console.log("PDF file created : "+mangaName);
-    });
+        return mangaName;
+    })
 }
+
+
+const http = require("http");
+const express = require("express");
+const path = require("path");
+const querystring = require("querystring");
+
+
+const app = express();
+const server = http.createServer(app);
+app.use(express.static(path.join(__dirname,'./public')));
+
+
+app.get('/', function(request, response) {
+    response.sendFile(path.join(__dirname, './public/index.html'));
+});
+
+app.get('/manga', function(request, response){
+    console.log(request._parsedOriginalUrl["query"]);
+    var query = request._parsedOriginalUrl["query"];
+    var uri = query.slice(query.indexOf('=')+1,query.length);
+    var url = querystring.unescape(uri.toString());
+    console.log("Decoding querystring "+url);
+    var mangaRes = getManga(url);
+
+    Promise.resolve(mangaRes)
+    .then( (request, response) => {
+        var mangaName = url.slice(url.indexOf("comics")+7, url.length-1).replace("/","_")+".pdf";
+        var tempFile='./' + mangaName;
+        fs.readFile(tempFile, function (err,data){
+           response.contentType("application/pdf");
+           response.send(data);
+        });
+    })
+});
+
+server.listen(3000, function(){
+    console.log("server is listening on port: 3000");
+  });
