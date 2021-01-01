@@ -25,7 +25,7 @@ const dest = "./Book";
  * Parses the url for the comic, downloads the pages and adds all of them to a PDF file.
  * @param {*} url The url from where the comic should be parsed. 
  */
-function getManga(url){
+function getManga(res, url){
     nightmare 
     .goto(url) // go to the url
     .wait('body') // wait for the whole body to load
@@ -50,11 +50,18 @@ function getManga(url){
     })
     .then((mangaName) => {
         console.log("Promise resolved! Manganme is ./"+mangaName);
-        return "./"+mangaName;
+        renderPDF(res, "./"+mangaName);
     })
     .catch(err => { // catch the errors
         console.log(err);  // and log on the console
     });
+}
+
+function renderPDF(response, mangaName) {
+fs.readFile(mangaName, function (err,data){
+    response.contentType("application/pdf");
+    response.send(data);
+});
 }
 
 /**
@@ -91,7 +98,7 @@ function getJSONData(html) {
                 filename: './Book/' + i + ext
             }
         );
-        if(i - beg +1 == 1) break;
+        // if(i - beg +1 == 1) break;
     }
     // and return the whole thing
     return data;
@@ -139,7 +146,6 @@ function createFile(url, data){
         pdfdoc.end();
     }).then( () => {
         console.log("PDF file created : "+mangaName);
-        return mangaName;
     })
 }
 
@@ -165,17 +171,7 @@ app.get('/manga', function(request, response){
     var uri = query.slice(query.indexOf('=')+1,query.length);
     var url = querystring.unescape(uri.toString());
     console.log("Decoding querystring "+url);
-    var mangaRes = getManga(url);
-
-    Promise.resolve(mangaRes)
-    .then( (request, response) => {
-        var mangaName = url.slice(url.indexOf("comics")+7, url.length-1).replace("/","_")+".pdf";
-        var tempFile='./' + mangaName;
-        fs.readFile(tempFile, function (err,data){
-           response.contentType("application/pdf");
-           response.send(data);
-        });
-    })
+    var mangaRes = getManga(response, url);
 });
 
 server.listen(3000, function(){
