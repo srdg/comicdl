@@ -1,22 +1,14 @@
 // Import required modules
 const Nightmare = require("nightmare");
-const cheerio = require("cheerio");
-const zeropad = require("zeropad");
-const download = require("./utils/download");
 const fs = require("fs");
-const PDFDocument = require("pdfkit");
-const Bottleneck = require("bottleneck/es5");
-
+const pagereader = require("./utils/pagereader")
+const generator = require("./utils/generator");
+const downloader = require("./utils/downloader");
 
 const nightmare = Nightmare({ 
     // Uncomment the following line to see the browser instance
    // show : true 
 });
-
-const limiter = new Bottleneck({
-    maxConcurrent: 1,
-    minTime: 333
-  });
 
 // location to where the pages will be stored
 const dest = "./Book";
@@ -26,7 +18,7 @@ const dest = "./Book";
  * @param {*} url The url from where the comic should be parsed. 
  */
 function getManga(res, url){
-    nightmare 
+    var destfile = nightmare 
     .goto(url) // go to the url
     .wait('body') // wait for the whole body to load
     .evaluate( ()=>document.querySelector('body').innerHTML) // validate the HTML content is present
@@ -37,116 +29,28 @@ function getManga(res, url){
          * The JSON contains a page number of the comic and an url.
          * Take the JSON, and pass it to processJSONData for further processing.
          */
-        return getJSONData(response);
+        return pagereader.getJSONData(response);
     })
     .then((data) => {
-        return limiter.schedule(() => processJSONData(data));
+        return downloader.download(data);
     })
-    .then((pages) => {
+    .then(() => {
         console.log(" Inside createFile then block ");
-        console.log(pages.toString().split(","));
-        var mangaName = createFile(url, pages);
-        return mangaName;
+        var filename = url.slice(url.indexOf("comics")+7, url.length-1).replace("/","_")+".pdf";
+        return generator.generate('./Pages.json', filename);
     })
-    .then((mangaName) => {
-        console.log("Promise resolved! Manganme is ./"+mangaName);
-        renderPDF(res, "./"+mangaName);
+    .then((pdffile) => {
+        console.log("Sending file "+pdffile + " to client...")
+        filepath = path.resolve(pdffile);
+        console.log("File on server is located at "+filepath);
+        return filepath;
     })
     .catch(err => { // catch the errors
         console.log(err);  // and log on the console
+        return null;
     });
-}
 
-function renderPDF(response, mangaName) {
-fs.readFile(mangaName, function (err,data){
-    response.contentType("application/pdf");
-    response.send(data);
-});
-}
-
-/**
- * Reads the HTML content and scours the DOM to get the URL(s) for each page of the comic.
- * @param {*} html the HTML content retrieved from parsing the parent constant `url`.
- */
-function getJSONData(html) {
-    // data to be returned
-    data = [];
-    // load the HTML content
-    const $ = cheerio.load(html);
-    // and now it's time to hack, slice and dice the content to get what we need
-    // src will contain the path to the comic page on server
-    var src = "https://www.omgbeaupeep.com/comics/" + $('[class=picture]')[0].attribs['src'];
-    var len = $('[name=page]')[0].children.length; // gives you number of pages for the comic
-    var hyphenIdx = src.lastIndexOf('-'); // this will come in handy later
-    var dotIndex = src.lastIndexOf('.'); //==============ditto=============
-    var num = src.slice(hyphenIdx + 1, dotIndex); // this gives the first page as is in url (e.g. 0001)
-    var pad = num.length; // this is the length of num as is in url, (e.g. 0001 will give a pad 4)
-    var baseurl = src.slice(0, hyphenIdx + 1); // this gives the complete base url
-    var ext = src.slice(dotIndex, src.length); // this gives you the file extension (e.g. .jpg, .png)
-    var beg = parseInt(num); // this is the first page number as an integer
-
-
-    // start from `beg` since we don't know what the first page number is
-    // and continue till `beg+len`
-    for (var i = beg; i < beg + len; i++) { 
-        // form the URL. Zeropad is used to pad the integer before it gets appeneded to the string
-        var urlc = baseurl + zeropad(i, pad) + ext;
-        // put it in the data
-        data.push(
-            {
-                uri: urlc,
-                filename: './Book/' + i + ext
-            }
-        );
-        // if(i - beg +1 == 1) break;
-    }
-    // and return the whole thing
-    return data;
-}
-
-/**
- * Parses the JSON data and downloads the images from the given URL(s).  
- * Saves the images in the directory `./Book` with the page number for each file.
- * @param {*} data the JSON data containing the detailed information about the comic book pages
- */
-function processJSONData(data){
-    console.log("Processing JSON data. Content follows."); 
-    console.log(data); // Log the JSON contents just to flex
-
-    // map() instead of forEach() to get a promise per request
-    const reqs = download(data)
-    .then( (info) => {
-            console.log(" Download complete! \n",info); 
-            return info;
-    });
-    // wait for all of them to be finished
-    return reqs;
-}
-
-/**
- * Create the PDF file from the pages
- * @param {*} data the list of pages to be added to the comic
- */
-function createFile(url, data){
-    // Synchronized version of creating PDF
-    var pdfdoc = new PDFDocument;
-    // get the comic name
-    var mangaName = url.slice(url.indexOf("comics")+7, url.length-1).replace("/","_")+".pdf";
-    pdfdoc.pipe(fs.createWriteStream(mangaName));
-    var pagelist = data.toString().split(",");
-    // Add a new page and create the PDF by adding each image per page
-    const pages = pagelist.map(page => {
-        // console.log(page.toString());
-        pdfdoc.addPage();
-        pdfdoc.image(page, {scale:0.45, align:'center', valign:'center'}); 
-        
-    });
-    // Once all pages are finished, mark the end of document, log and return the filename
-    Promise.all(pages).then(() => {
-        pdfdoc.end();
-    }).then( () => {
-        console.log("PDF file created : "+mangaName);
-    })
+    return destfile;
 }
 
 
@@ -165,13 +69,20 @@ app.get('/', function(request, response) {
     response.sendFile(path.join(__dirname, './public/index.html'));
 });
 
-app.get('/manga', function(request, response){
+app.get('/download-comic', function(request, response){
     console.log(request._parsedOriginalUrl["query"]);
     var query = request._parsedOriginalUrl["query"];
     var uri = query.slice(query.indexOf('=')+1,query.length);
     var url = querystring.unescape(uri.toString());
     console.log("Decoding querystring "+url);
-    var mangaRes = getManga(response, url);
+    getManga(response, url).then((destfile) => {
+        console.log("File returned : "+destfile);
+        var stream = fs.createReadStream(destfile);
+        response.setHeader('Content-disposition', 'inline; filename="download.pdf"');
+        response.setHeader('Content-type', 'application/pdf');
+        stream.pipe(response);
+    });
+    
 });
 
 server.listen(3000, function(){
