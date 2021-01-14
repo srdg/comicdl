@@ -125,3 +125,6 @@ dist
 
 # Comic pages
 ./Book/*
+
+# Intermediate files
+Pages.json
